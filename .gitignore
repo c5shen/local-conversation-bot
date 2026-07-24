@@ -7,6 +7,9 @@ __pycache__/
 .env
 *.log
 
+# Session logs (saved conversations)
+.cache/
+
 # Large local assets (installed by scripts/setup.* - do not commit)
 tools/
 data/

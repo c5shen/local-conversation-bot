@@ -2,8 +2,9 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime
 
-from . import agent, metrics, stt, tts
+from . import agent, metrics, sessions, stt, tts
 from .audio import SentenceAccumulator, pcm16_to_wav
 from .config import LANGUAGES, language_key_from_whisper, load_system_prompt, settings
 
@@ -14,12 +15,54 @@ class Session:
     def __init__(self, websocket) -> None:
         self.ws = websocket
         self.history: list[dict] = []
+        # Rich transcript persisted to the session log (role/text/language/voice).
+        self.messages: list[dict] = []
+        self.persist_id: str | None = None   # set once the session first gets content
+        self.created_at: str | None = None
         self.stt_language: str | None = None  # whisper code, or None for auto-detect
         # When True, the reply language follows the detected spoken language.
         # When False, the user's explicit "Reply in" choice is authoritative.
         self.match_speech: bool = True
         self.set_response_language(settings.default_language)
         self.set_stt_language(settings.default_stt)
+
+    # ---- Session log (persisted under ./.cache) ----
+    def reset_session(self) -> None:
+        """Start a fresh, empty conversation (the '+ New' action)."""
+        self.history = []
+        self.messages = []
+        self.persist_id = None
+        self.created_at = None
+
+    def load_saved(self, session_id: str) -> dict | None:
+        """Make a stored session the active one so the conversation can continue."""
+        data = sessions.load(session_id)
+        if not data:
+            return None
+        self.messages = list(data.get("messages") or [])
+        self.history = [
+            {"role": m["role"], "content": m["text"]}
+            for m in self.messages
+            if m.get("text") and m.get("role") in ("user", "assistant")
+        ]
+        self.persist_id = data.get("id")
+        self.created_at = data.get("created_at")
+        return data
+
+    def _record(self, role: str, text: str, language: str, voice: str) -> None:
+        if (text or "").strip():
+            self.messages.append(
+                {"role": role, "text": text, "language": language, "voice": voice}
+            )
+
+    def _persist(self) -> dict | None:
+        """Write the session file (assigning an id on first content). Blocking IO."""
+        if not self.messages:
+            return None
+        if self.persist_id is None:
+            self.persist_id = sessions.new_id()
+            self.created_at = datetime.now().isoformat(timespec="seconds")
+        return sessions.save(self.persist_id, self.created_at, self.messages)
 
     def set_stt_language(self, key: str) -> None:
         """key is a LANGUAGES key or 'auto'."""
@@ -117,6 +160,29 @@ class Session:
             )
         return load_system_prompt() + instr
 
+    def _reply_nudge(self) -> str:
+        """A short, per-turn instruction appended to the latest user message.
+
+        Qwen tends to mirror the language of the most recent user turn, so a system
+        prompt directive alone is unreliable. Repeating the requirement right on the
+        user message (in English + the target language) makes it stick.
+        """
+        directive = LANGUAGES[self.response_key].get("reply_directive", "").strip()
+        return f"\n\n[Reply only in {self.lang_name}. {directive}]"
+
+    def _agent_messages(self) -> list[dict]:
+        """History copy with the reply-language nudge on the last user message.
+
+        The stored history stays clean (plain transcripts); only the copy handed to
+        the LLM carries the nudge.
+        """
+        msgs = [dict(m) for m in self.history]
+        for i in range(len(msgs) - 1, -1, -1):
+            if msgs[i].get("role") == "user":
+                msgs[i]["content"] = (msgs[i].get("content") or "") + self._reply_nudge()
+                break
+        return msgs
+
     async def _send_audio(self, pcm: bytes) -> None:
         if pcm:
             await self.ws.send_bytes(pcm)
@@ -164,12 +230,13 @@ class Session:
              "language": spoken_key, "voice": spoken_voice}
         )
         self.history.append({"role": "user", "content": transcript})
+        self._record("user", transcript, spoken_key, spoken_voice)
 
         accumulator = SentenceAccumulator()
         final_answer = ""
 
         async for event, payload in agent.stream_reply(
-            self.history, self._system_message(detected_key)
+            self._agent_messages(), self._system_message(detected_key)
         ):
             if event == "tool_call":
                 await self.ws.send_json({"type": "tool", "name": payload})
@@ -191,7 +258,12 @@ class Session:
             await self._speak(remainder)
 
         self.history.append({"role": "assistant", "content": final_answer})
+        self._record("assistant", final_answer, self.response_key, self.tts_voice)
+        # Persist the turn (creates the file on first content) and let the UI know.
+        meta = await asyncio.to_thread(self._persist)
         await self._update_token_usage()
+        if meta:
+            await self.ws.send_json({"type": "session_saved", "session": meta})
         await self.ws.send_json({"type": "done"})
 
     async def _update_token_usage(self) -> None:

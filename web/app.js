@@ -21,6 +21,10 @@ const threshEl = document.getElementById("thresh");
 const threshTextEl = document.getElementById("threshText");
 const meterFillEl = document.getElementById("meterFill");
 const meterThreshEl = document.getElementById("meterThresh");
+const sessionListEl = document.getElementById("sessionList");
+const newSessionBtn = document.getElementById("newSession");
+const sidebarEl = document.getElementById("sidebar");
+const sidebarToggle = document.getElementById("sidebarToggle");
 
 let ws = null;
 let ttsSampleRate = 24000;
@@ -29,6 +33,7 @@ let sttLanguages = [];    // engine-agnostic STT languages: [{key, name}]
 let engines = [];         // [{id, name}]
 let activeEngine = null;  // id of the currently deployed TTS engine
 let uiLocked = false;     // true while a TTS engine is being (re)deployed
+let activeSessionId = null; // id of the session shown in the log (null = unsaved/new)
 
 // Per-turn rendering state
 let currentBot = null;   // {div, content} for the in-progress assistant bubble
@@ -288,6 +293,19 @@ function handleControl(msg) {
     case "engine_error":
       onEngineError(msg);
       break;
+    case "session_saved":
+      // A turn was persisted; adopt its id and refresh the sidebar ordering.
+      if (msg.session) activeSessionId = msg.session.id;
+      refreshSessions();
+      break;
+    case "session_new":
+      activeSessionId = null;
+      clearLog();
+      markActiveSession();
+      break;
+    case "session_loaded":
+      onSessionLoaded(msg);
+      break;
     case "language_update":
       // In "Match my speech" mode the server picked a language from the audio.
       // Keep the dropdown on "Match"; just note the detection in the status.
@@ -427,6 +445,121 @@ function endTurn() {
   finishTool();
   currentBot = null;
   currentBotRaw = "";
+}
+
+// ---------- Session log ----------
+// Wipe the transcript view and any in-progress turn state (used when switching
+// sessions or starting a new one).
+function clearLog() {
+  logEl.innerHTML = "";
+  endTurn();
+  stopActiveReplay(null);
+  turnBusy = false;
+}
+
+// Render a complete assistant bubble (markdown + replay) from stored history.
+function addAssistantBubble(text, language, voice) {
+  const m = makeMsg("bot", "Assistant", true);
+  m.content.innerHTML = renderMarkdown(text || "");
+  m.div._ttsText = text;
+  m.div._ttsLang = language;
+  m.div._ttsVoice = voice;
+  scrollLog();
+}
+
+function onSessionLoaded(msg) {
+  activeSessionId = msg.id;
+  clearLog();
+  for (const m of msg.messages || []) {
+    if (m.role === "user") {
+      addMessage(m.text, "user", "You", { language: m.language, voice: m.voice });
+    } else if (m.role === "assistant") {
+      addAssistantBubble(m.text, m.language, m.voice);
+    }
+  }
+  markActiveSession();
+  setStatus("Ready", "ready");
+}
+
+function switchSession(id) {
+  if (!wsReady() || id === activeSessionId) return;
+  ws.send(JSON.stringify({ type: "load_session", id }));
+}
+
+function startNewSession() {
+  if (!wsReady()) return;
+  ws.send(JSON.stringify({ type: "new_session" }));
+}
+
+async function deleteSession(id) {
+  try {
+    await fetch("/api/sessions/" + encodeURIComponent(id), { method: "DELETE" });
+  } catch (e) {
+    /* ignore */
+  }
+  if (id === activeSessionId) {
+    // The deleted session was on screen; drop back to a fresh one.
+    activeSessionId = null;
+    startNewSession();
+  }
+  refreshSessions();
+}
+
+async function refreshSessions() {
+  try {
+    const data = await (await fetch("/api/sessions")).json();
+    renderSessionList(data.sessions || []);
+  } catch (e) {
+    /* transient; ignore */
+  }
+}
+
+function renderSessionList(list) {
+  sessionListEl.innerHTML = "";
+  if (!list.length) {
+    const li = document.createElement("li");
+    li.className = "session-empty";
+    li.textContent = "No saved sessions yet.";
+    sessionListEl.appendChild(li);
+    return;
+  }
+  for (const s of list) {
+    const li = document.createElement("li");
+    li.className = "session-item" + (s.id === activeSessionId ? " active" : "");
+    li.dataset.id = s.id;
+    li.onclick = () => switchSession(s.id);
+
+    const title = document.createElement("div");
+    title.className = "session-title";
+    title.textContent = s.title || "Untitled session";
+
+    const meta = document.createElement("div");
+    meta.className = "session-meta";
+    meta.textContent = formatSessionMeta(s);
+
+    const del = document.createElement("button");
+    del.className = "session-del";
+    del.type = "button";
+    del.title = "Delete session";
+    del.innerHTML = "&times;";
+    del.onclick = (e) => { e.stopPropagation(); deleteSession(s.id); };
+
+    li.append(title, meta, del);
+    sessionListEl.appendChild(li);
+  }
+}
+
+function formatSessionMeta(s) {
+  const turns = s.turns || 0;
+  const when = (s.updated_at || "").replace("T", " ").slice(0, 16);
+  return `${turns} turn${turns === 1 ? "" : "s"}${when ? " · " + when : ""}`;
+}
+
+// Highlight the active session in the sidebar without a full refetch.
+function markActiveSession() {
+  for (const li of sessionListEl.querySelectorAll(".session-item")) {
+    li.classList.toggle("active", li.dataset.id === activeSessionId);
+  }
 }
 
 // ---------- Language selection ----------
@@ -858,6 +991,12 @@ document.addEventListener("keyup", (e) => {
   }
 });
 
+newSessionBtn.addEventListener("click", startNewSession);
+sidebarToggle.addEventListener("click", () => sidebarEl.classList.toggle("hidden"));
+// The sidebar is an overlay on narrow screens; start it collapsed there.
+if (window.matchMedia("(max-width: 640px)").matches) sidebarEl.classList.add("hidden");
+
 updateThreshold();
 updateModeUI();
 connect();
+refreshSessions();

@@ -4,8 +4,8 @@ A fully local, low-latency voice assistant for Windows 10 + NVIDIA RTX 3090 (24 
 
 - **STT**: [whisper.cpp](https://github.com/ggml-org/whisper.cpp) `whisper-server` (CUDA)
 - **LLM**: [Qwen3.5-9B](https://huggingface.co/Qwen/Qwen3.5-9B) as a Q4_K_M GGUF via [llama.cpp](https://github.com/ggml-org/llama.cpp) `llama-server`
-- **Agent + tools**: [Qwen-Agent](https://github.com/QwenLM/Qwen-Agent) in-process, with a keyless DuckDuckGo web-search tool over MCP
-- **TTS**: [Qwen3-TTS](https://github.com/QwenLM/Qwen3-TTS) `12Hz-1.7B-CustomVoice` (multilingual, cross-lingual named speakers)
+- **Agent + tools**: [Qwen-Agent](https://github.com/QwenLM/Qwen-Agent) in-process, with [Tavily](https://tavily.com) web-search and page-extract tools
+- **TTS**: switchable live in the UI - [Kokoro](https://github.com/hexgrad/kokoro) `82M` (default, small/fast) or [Qwen3-TTS](https://github.com/QwenLM/Qwen3-TTS) `12Hz-1.7B-CustomVoice` (higher quality, cross-lingual named speakers)
 - **Orchestrator**: FastAPI + WebSocket browser UI (hold-to-talk or hands-free voice threshold)
 - **Language tutor mode**: pick the STT language, reply language, and voice in the UI (English, Chinese, Japanese, Korean, German, French, Russian, Spanish, Italian, Portuguese)
 
@@ -13,7 +13,7 @@ A fully local, low-latency voice assistant for Windows 10 + NVIDIA RTX 3090 (24 
 Browser (mic, hold-to-talk) --PCM16 16k--> FastAPI orchestrator
                                             |-- whisper-server (/inference) -> transcript
                                             |-- Qwen-Agent -> llama-server (OpenAI API)
-                                            |        \--MCP--> DuckDuckGo search
+                                            |        \--Tavily API--> web search / extract
                                             |-- Qwen3-TTS (sentence streaming)
 Browser (speaker)           <--PCM16 24k--  /
 ```
@@ -91,7 +91,7 @@ powershell -ExecutionPolicy Bypass -File scripts\run_app.ps1       # UI   :8080
 
 ## Configuration
 
-Settings live in `server/config.py` and can be overridden via `.env` (copied from `.env.example`): service URLs, sampling, TTS voice/device, the search toggle (`ENABLE_SEARCH`), and the search MCP launch command (`DDG_COMMAND` / `DDG_ARGS`).
+Settings live in `server/config.py` and can be overridden via `.env` (copied from `.env.example`): service URLs, sampling, TTS engine/voice/device, and web search. Search uses [Tavily](https://tavily.com) - set `TAVILY_API_KEY` and toggle it with `ENABLE_SEARCH` (tune `TAVILY_SEARCH_DEPTH`, `TAVILY_MAX_RESULTS`, `TAVILY_INCLUDE_ANSWER`).
 
 ## Context window & VRAM (24 GB RTX 3090)
 
@@ -145,7 +145,7 @@ larger windows reserve that VRAM even for short chats.
 
 - **No audio / mic blocked**: the page must be `http://localhost` (a secure context). Allow mic access when prompted.
 - **`uv` not found by a script**: open a new terminal so `%USERPROFILE%\.local\bin` is on `PATH`, or pass the full path.
-- **Search never triggers**: confirm `uvx duckduckgo-mcp-server` runs standalone; set `ENABLE_SEARCH=false` to disable tools.
+- **Search never triggers**: confirm `TAVILY_API_KEY` is set in `.env` (search is skipped with a log warning when it's empty); set `ENABLE_SEARCH=false` to disable tools.
 - **Thinking text spoken**: the orchestrator strips `<think>...</think>`; `enable_thinking=false` is also sent to the LLM.
 - **GGUF won't load (`unknown architecture: qwen35`)**: bump `$LLAMA_TAG` in `scripts\setup.ps1` to a newer llama.cpp release, or use the WSL2 + vLLM fallback (`scripts/run_llm_wsl_vllm.sh`).
 - **Latency**: lower the whisper model, keep `MAX_TOKENS` modest, and keep utterances short.

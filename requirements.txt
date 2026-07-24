@@ -18,7 +18,8 @@ fastapi>=0.115
 uvicorn[standard]>=0.30
 httpx>=0.27
 openai>=1.40
-qwen-agent[mcp]>=0.0.10
+qwen-agent>=0.0.10
+tavily-python>=0.5  # Tavily web search + extract tools (see server/tools_tavily.py)
 numpy>=1.26
 soundfile>=0.12
 # --- Text-to-speech engines (switchable live from the UI; see server/tts.py) ---

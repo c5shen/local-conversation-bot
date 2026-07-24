@@ -7,8 +7,17 @@
   <link rel="stylesheet" href="/static/styles.css" />
 </head>
 <body>
-  <main>
+  <div class="layout">
+    <aside id="sidebar" class="sidebar">
+      <div class="sidebar-head">
+        <span>Sessions</span>
+        <button id="newSession" class="new-session" type="button">+ New</button>
+      </div>
+      <ul id="sessionList" class="session-list"></ul>
+    </aside>
+    <main>
     <header>
+      <button id="sidebarToggle" class="icon-btn" type="button" aria-label="Toggle sessions">&#9776;</button>
       <h1>Local Voice Chatbot</h1>
       <span id="status" class="status">Connecting...</span>
     </header>
@@ -72,7 +81,8 @@
       </button>
       <p id="hint" class="hint">Hold the button (or press and hold the spacebar) while speaking, then release.</p>
     </footer>
-  </main>
+    </main>
+  </div>
 
   <script src="/static/app.js"></script>
 </body>

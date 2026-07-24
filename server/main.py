@@ -10,7 +10,7 @@ from fastapi import Body, FastAPI, Response, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import agent, metrics, tts
+from . import agent, metrics, sessions, tts
 from .audio import pcm16_to_wav
 from .config import LANGUAGES, settings
 from .pipeline import Session
@@ -39,6 +39,27 @@ async def index() -> FileResponse:
 async def api_metrics() -> dict:
     """GPU usage + current context-token usage for the status display."""
     return await metrics.snapshot()
+
+
+@app.get("/api/sessions")
+async def api_sessions() -> dict:
+    """Metadata for every stored session, newest first (for the session log tab)."""
+    return {"sessions": await asyncio.to_thread(sessions.list_all)}
+
+
+@app.get("/api/sessions/{session_id}")
+async def api_session(session_id: str) -> Response:
+    """The full transcript of one stored session."""
+    data = await asyncio.to_thread(sessions.load, session_id)
+    if not data:
+        return Response(status_code=404)
+    return Response(content=json.dumps(data), media_type="application/json")
+
+
+@app.delete("/api/sessions/{session_id}")
+async def api_session_delete(session_id: str) -> Response:
+    ok = await asyncio.to_thread(sessions.delete, session_id)
+    return Response(status_code=204 if ok else 404)
 
 
 @app.post("/api/tts")
@@ -127,6 +148,24 @@ async def ws(websocket: WebSocket) -> None:
                         session.configure(data)
                     elif kind == "set_engine":
                         await _switch_engine(websocket, session, data.get("engine"))
+                    elif kind == "new_session":
+                        session.reset_session()
+                        await websocket.send_json({"type": "session_new"})
+                    elif kind == "load_session":
+                        data_loaded = await asyncio.to_thread(
+                            session.load_saved, data.get("id")
+                        )
+                        if data_loaded:
+                            await websocket.send_json({
+                                "type": "session_loaded",
+                                "id": data_loaded.get("id"),
+                                "title": data_loaded.get("title"),
+                                "messages": data_loaded.get("messages") or [],
+                            })
+                        else:
+                            await websocket.send_json(
+                                {"type": "error", "text": "Session not found."}
+                            )
     except WebSocketDisconnect:
         pass
     except Exception as exc:  # noqa: BLE001 - report then close cleanly

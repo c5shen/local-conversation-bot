@@ -157,14 +157,14 @@ class Settings(BaseSettings):
     tts_attn: str = "sdpa"
     filler_text: str = "Let me look that up."
 
-    # Agent / tools
+    # Agent / tools (Tavily web search + extract; https://tavily.com)
     enable_search: bool = True
-    ddg_command: str = "uvx"
-    ddg_args: str = "duckduckgo-mcp-server"
-
-    @property
-    def ddg_arg_list(self) -> list[str]:
-        return [a for a in self.ddg_args.split() if a]
+    tavily_api_key: str = ""  # from TAVILY_API_KEY in .env
+    # "basic" is fast/cheap; "advanced" digs deeper (higher latency + cost).
+    tavily_search_depth: str = "basic"
+    tavily_max_results: int = 5
+    # Ask Tavily for a short LLM-generated answer alongside the raw results.
+    tavily_include_answer: bool = True
 
 
 settings = Settings()

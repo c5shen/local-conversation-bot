@@ -1,4 +1,4 @@
-"""Qwen-Agent reasoning loop with a keyless DuckDuckGo web-search MCP tool.
+"""Qwen-Agent reasoning loop with Tavily web-search + page-extract tools.
 
 Qwen-Agent runs as a synchronous generator. We run it in a worker thread and
 bridge its output to an async generator that yields events:
@@ -13,10 +13,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import os
 import re
-import shutil
-from pathlib import Path
 from typing import AsyncIterator
 
 from .config import load_system_prompt, settings
@@ -33,19 +30,6 @@ _CONTEXT_MARGIN = 512
 
 _bot = None
 _input_budget_set = False
-
-
-def _resolve_command(cmd: str) -> str | None:
-    """Find an executable on PATH or in the default uv install dir (~/.local/bin)."""
-    found = shutil.which(cmd)
-    if found:
-        return found
-    local_bin = Path.home() / ".local" / "bin"
-    for name in ((cmd, cmd + ".exe") if os.name == "nt" else (cmd,)):
-        candidate = local_bin / name
-        if candidate.exists():
-            return str(candidate)
-    return None
 
 
 def _strip_think(text: str) -> str:
@@ -77,16 +61,14 @@ def _build_bot():
 
     function_list = []
     if settings.enable_search:
-        command = _resolve_command(settings.ddg_command)
-        if command:
-            function_list.append(
-                {"mcpServers": {"ddg": {"command": command, "args": settings.ddg_arg_list}}}
-            )
+        if settings.tavily_api_key.strip():
+            # Importing the module registers the tools with Qwen-Agent's registry.
+            from . import tools_tavily  # noqa: F401
+            function_list += ["tavily_search", "tavily_extract"]
         else:
             logger.warning(
-                "Search disabled: '%s' not found on PATH or in ~/.local/bin. "
-                "Install uv (https://docs.astral.sh/uv/) to enable web search.",
-                settings.ddg_command,
+                "Web search disabled: TAVILY_API_KEY is not set. Add it to your .env "
+                "to enable Tavily search/extract (https://tavily.com)."
             )
 
     try:
