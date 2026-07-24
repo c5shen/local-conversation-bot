@@ -74,7 +74,12 @@ function setStatus(text, cls) {
 }
 
 function scrollLog() {
-  logEl.scrollTop = logEl.scrollHeight;
+  // Defer to the next frame so the just-inserted/updated content is laid out
+  // before we measure scrollHeight; otherwise we scroll to the stale height and
+  // stop short of the real bottom.
+  requestAnimationFrame(() => {
+    logEl.scrollTop = logEl.scrollHeight;
+  });
 }
 
 const ICON_PLAY =
@@ -194,6 +199,7 @@ function addMessage(text, kind, who, tts) {
     m.div._ttsLang = tts.language;
     m.div._ttsVoice = tts.voice;
   }
+  scrollLog(); // makeMsg scrolled while the bubble was still empty; re-scroll now.
   return m;
 }
 

@@ -56,19 +56,63 @@ class Session:
         elif "voice" in msg:
             self.set_response_language(self.response_key, msg["voice"])
 
-    def _system_message(self) -> str:
+    def _input_language_name(self, spoken_key: str | None) -> str | None:
+        """Human name of the language the user is speaking, or None if unknown.
+
+        An explicit "I speak X" choice wins; otherwise fall back to the language
+        whisper detected for this utterance (spoken_key).
+        """
+        if self.stt_language:
+            key = language_key_from_whisper(self.stt_language)
+            if key:
+                return LANGUAGES[key]["name"]
+        if spoken_key and spoken_key in LANGUAGES:
+            return LANGUAGES[spoken_key]["name"]
+        return None
+
+    def _system_message(self, spoken_key: str | None = None) -> str:
+        """Build the system prompt, naming BOTH the input and the output language.
+
+        The input language ("I speak ...", or the auto-detected one) and the output
+        language ("Reply in ...") are stated separately so the model doesn't just
+        mirror the transcript's language back to the TTS engine.
+        """
         lang = LANGUAGES[self.response_key]
-        # A native-language directive reliably forces the reply language; Qwen
-        # otherwise tends to mirror the language the user spoke.
-        instr = (
-            f"\n\nIMPORTANT: Write your entire reply in {self.lang_name} only. "
-            f"{lang.get('reply_directive', '')} "
-            "Never use any other language, even if the user speaks one."
-        )
+        out_name = self.lang_name
+        in_name = self._input_language_name(spoken_key)
+        directive = lang.get("reply_directive", "").strip()
+
+        lines = ["\n\nLANGUAGE INSTRUCTIONS:"]
+        if in_name and in_name != out_name:
+            # Cross-lingual: the user speaks one language, the reply must be another.
+            lines.append(
+                f"- The user is speaking to you in {in_name}, so the transcribed "
+                f"message you receive is written in {in_name}."
+            )
+            lines.append(
+                f"- No matter what language the user speaks, you MUST write your "
+                f"entire reply in {out_name} only. {directive}".rstrip()
+            )
+            lines.append(
+                f"- Do NOT reply in {in_name} and do NOT mirror the user's language; "
+                f"translate your response into {out_name}."
+            )
+        else:
+            # Same language in and out (explicit match, or the input is unknown).
+            spoken = f"in {in_name}" if in_name else "to you"
+            lines.append(f"- The user is speaking {spoken}.")
+            lines.append(
+                f"- Write your entire reply in {out_name} only. {directive}".rstrip()
+            )
+            lines.append(
+                f"- Never switch to another language, even if the user does."
+            )
+        instr = "\n".join(lines)
+
         # Tutor framing only when the user deliberately practices a different language.
         if not self.match_speech and self.stt_language and self.stt_language != lang["stt"]:
             instr += (
-                f" Act as a friendly {self.lang_name} tutor and gently correct the "
+                f"\n- Also act as a friendly {out_name} tutor and gently correct the "
                 "user's mistakes when it helps them learn."
             )
         return load_system_prompt() + instr
@@ -105,9 +149,13 @@ class Session:
                     {"type": "language_update", "response": key, "voice": self.tts_voice}
                 )
 
+        # The language whisper actually detected for this utterance (used both to
+        # name the input language in the prompt and to pick a replay voice).
+        detected_key = language_key_from_whisper(detected)
+
         # Tag the user message with the spoken language/voice so the UI can
         # replay it (synthesize the user's own text) in a matching voice.
-        spoken_key = language_key_from_whisper(detected) or self.response_key
+        spoken_key = detected_key or self.response_key
         if not tts.supports(spoken_key):
             spoken_key = self.response_key
         spoken_voice = tts.default_voice(spoken_key) or self.tts_voice
@@ -120,7 +168,9 @@ class Session:
         accumulator = SentenceAccumulator()
         final_answer = ""
 
-        async for event, payload in agent.stream_reply(self.history, self._system_message()):
+        async for event, payload in agent.stream_reply(
+            self.history, self._system_message(detected_key)
+        ):
             if event == "tool_call":
                 await self.ws.send_json({"type": "tool", "name": payload})
                 await self._send_audio(
