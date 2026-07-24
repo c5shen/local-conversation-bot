@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Local Voice Chatbot</title>
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <main>
+    <header>
+      <h1>Local Voice Chatbot</h1>
+      <span id="status" class="status">Connecting...</span>
+    </header>
+
+    <section class="controls">
+      <label>Voice engine
+        <select id="ttsEngine" disabled></select>
+      </label>
+      <label>I speak
+        <select id="sttLang" disabled>
+          <option value="auto">Auto-detect</option>
+        </select>
+      </label>
+      <label>Reply in
+        <select id="respLang" disabled></select>
+      </label>
+      <label>Voice
+        <select id="voice" disabled></select>
+      </label>
+    </section>
+
+    <section class="stats">
+      <div class="stat">
+        <div class="stat-label"><span>GPU</span><span id="gpuText">--</span></div>
+        <div class="bar"><div class="bar-fill" id="gpuBar"></div></div>
+      </div>
+      <div class="stat">
+        <div class="stat-label"><span>Context</span><span id="ctxText">--</span></div>
+        <div class="bar"><div class="bar-fill" id="ctxBar"></div></div>
+      </div>
+    </section>
+
+    <section id="log" class="log" aria-live="polite"></section>
+
+    <footer>
+      <div class="mode" role="radiogroup" aria-label="Talk mode">
+        <label class="mode-opt">
+          <input type="radio" name="mode" value="push" checked />
+          <span>Hold to talk</span>
+        </label>
+        <label class="mode-opt">
+          <input type="radio" name="mode" value="vad" />
+          <span>Hands-free (threshold)</span>
+        </label>
+      </div>
+
+      <div id="vadPanel" class="vad-panel" hidden>
+        <label class="thresh-label">
+          <span>Mic threshold</span>
+          <span id="threshText" class="thresh-val">-50 dB</span>
+        </label>
+        <input id="thresh" type="range" min="-80" max="-10" step="1" value="-50" />
+        <div class="meter" aria-hidden="true">
+          <div id="meterFill" class="meter-fill"></div>
+          <div id="meterThresh" class="meter-thresh"></div>
+        </div>
+      </div>
+
+      <button id="talk" class="talk" disabled>
+        <span class="talk-label">Hold to talk</span>
+      </button>
+      <p id="hint" class="hint">Hold the button (or press and hold the spacebar) while speaking, then release.</p>
+    </footer>
+  </main>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

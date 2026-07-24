@@ -1,0 +1,16 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+
+# Local config / logs
+.env
+*.log
+
+# Large local assets (installed by scripts/setup.* - do not commit)
+tools/
+data/
+models/
+*.gguf
+*.bin
+*.zip

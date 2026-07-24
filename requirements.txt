@@ -1,0 +1,33 @@
+# Orchestrator (FastAPI + WebSocket) + agent + TTS dependencies.
+#
+# Recommended install (handles the CUDA PyTorch wheel automatically):
+#   uv pip install --torch-backend cu124 -r requirements.txt
+# Plain pip users: install the CUDA torch wheel FIRST, then this file:
+#   pip install torch --index-url https://download.pytorch.org/whl/cu124
+#   pip install -r requirements.txt
+# (scripts/setup.ps1 / setup.sh do this for you.)
+
+torch>=2.6,<2.8
+# torchaudio is a runtime dep of qwen-tts; keep it in lockstep with torch so pip/uv
+# don't resolve a newer wheel whose C++ ABI mismatches torch (WinError 127 on import).
+torchaudio>=2.6,<2.8
+
+nvidia-ml-py>=12.535  # GPU usage metrics (NVML) for the status display
+
+fastapi>=0.115
+uvicorn[standard]>=0.30
+httpx>=0.27
+openai>=1.40
+qwen-agent[mcp]>=0.0.10
+numpy>=1.26
+soundfile>=0.12
+# --- Text-to-speech engines (switchable live from the UI; see server/tts.py) ---
+# Kokoro is the default (small/fast). Non-English languages use the espeak-ng
+# backend via misaki, so install the espeak-ng binary too (e.g. Windows: the
+# eSpeak NG installer; Debian/Ubuntu: apt install espeak-ng).
+kokoro>=0.9,<0.10
+misaki[en,ja,zh]>=0.9,<0.10  # g2p backends for Kokoro (English/Japanese/Chinese)
+qwen-tts>=0.1  # Qwen3-TTS (CustomVoice); higher quality, heavier. Weights auto-download from HF
+transformers>=4.44
+python-dotenv>=1.0
+pydantic-settings>=2.4
